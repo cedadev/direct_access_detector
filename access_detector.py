@@ -3,10 +3,11 @@ import os
 from stat import S_ISLNK, S_ISDIR
 import urllib.request
 import sys
+import time
 
 STORE = "/datacentre/processing3/access_detector/last_logs"
 FILESETINFOURL = 'https://cedaarchiveapp.ceda.ac.uk/fileset/%s/info'
-
+SPOTLISTURL = 'https://cedaarchiveapp.ceda.ac.uk/fileset/download_conf/'
 
 class FileSetListing:
 
@@ -18,8 +19,6 @@ class FileSetListing:
         self.filesetinfo = {}
         self.last_audit_time = 0 
         self.current_loc = None
-        self.open_next()
-        self.open_prev()
 
     def store_file(self):
         return os.path.join(STORE, f"{self.spot}.txt")
@@ -27,6 +26,11 @@ class FileSetListing:
         return os.path.join(STORE, f"{self.spot}_____tmp.txt")
     def store_bak_file(self):
         return os.path.join(STORE, f"{self.spot}_____bak.txt")
+
+    def last_done(self):
+        if not os.path.exists(self.store_file()):
+           return 0
+        return os.path.getmtime(self.store_file())
         
     def get_filesetinfo(self):
         with urllib.request.urlopen(FILESETINFOURL % self.spot) as f:
@@ -59,6 +63,10 @@ class FileSetListing:
         path_from_file, atime = line.strip().split("|")
         return path_from_file, int(atime)
 
+    def open(self):
+        self.open_prev()
+        self.open_next()
+
     def open_prev(self):
         if not os.path.exists(self.store_file()):
             with open(self.store_file(), "w"):
@@ -79,10 +87,12 @@ class FileSetListing:
     def add(self, path, atime):
         self.next_fh.write(f"{path}|{atime}\n")
    
-
     def find_access_events(self, directory=None):
-        if directory is None: 
-            directory = self.current_loc
+        if directory is None:
+            self.get_filesetinfo() 
+            os.chdir(self.current_loc)
+            self.open()
+            directory = '.'
         contents = os.listdir(directory)
         contents.sort()
 
@@ -109,29 +119,46 @@ class FileSetListing:
 
             if prev_path != path:
                 # if the file is in the filesystem and not the list its new. 
-                #  A new file is an access event if the access time is 1 day post mtime.
-                if atime > mtime + 24*3600:
+                #  A new file is an access event only if the access time is 1 day post mtime.
+                if atime > mtime + 24*3600 and self.last_audit_time == 0:
+                    event_time = atime
+                    directory = ?
+                    name = ?
+                    item_type = "FILE"
+                    size = stat.st_size
+                    event_type = "direct_access"
                     print(f"{path}:    access after new file creation event")
             else:
                 # If the file is on the list and in the filesystem then 
                 #  if the atime is different from the previous one (allowing for audit times, backups?) then 
                 #    an access event has happened and the file goes on the next list.
-                if atime != prev_atime and atime > self.last_audit_time:
+                if atime > prev_atime and atime > self.last_audit_time:
                      print(f"{path}:   access event")
 
             #  The file goes on the next list.             
             self.add(path, atime)
 
+        if directory == ".":
+            self.close()
 
-def find_access_events(spot):
-    # get the prev list for a spot
-    
-    # go down the list and the filesystem together one file at a time
-    fslisting = FileSetListing(spot)
-    fslisting.get_filesetinfo()
-    fslisting.find_access_events()
-    fslisting.close()
+
+def get_spot_list():
+    spots = []
+    with urllib.request.urlopen(SPOTLISTURL) as f:
+        for line in f:
+            bits = line.decode().strip().split()
+            if len(bits) == 2: spots.append(bits[0])
+    return spots
+
+
+def main():
+    spots = get_spot_list()
+    for spot in get_spot_list():
+        print(spot)
+        fslisting = FileSetListing(spot)
+        if time.time() - fslisting.last_done() > 20*3600: 
+            fslisting.find_access_events()
+
 
 if __name__ == "__main__":
-    spot = sys.argv[1]
-    find_access_events(spot)
+    main()
