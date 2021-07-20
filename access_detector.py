@@ -10,6 +10,7 @@ STORE = "/datacentre/processing3/access_detector/last_logs"
 EVENTS = "/datacentre/processing3/access_detector/events"
 FILESETINFOURL = 'https://cedaarchiveapp.ceda.ac.uk/fileset/%s/info'
 SPOTLISTURL = 'https://cedaarchiveapp.ceda.ac.uk/fileset/download_conf/'
+NDAYS = 7   
 
 class FileSetListing:
 
@@ -30,7 +31,8 @@ class FileSetListing:
     def store_bak_file(self):
         return os.path.join(STORE, f"{self.spot}_____bak.txt")
     def event_file(self):
-        return os.path.join(EVENTS, f"{self.spot}.events.txt")
+        date = datetime.datetime.now().strftime("%Y-%m-%d-%H")
+        return os.path.join(EVENTS, f"{date}.events.txt")
 
     def last_done(self):
         if not os.path.exists(self.store_file()):
@@ -45,6 +47,9 @@ class FileSetListing:
                 self.last_audit_time = self.filesetinfo["last_audit_starttime"]
             if "last_audit_endtime" in self.filesetinfo: 
                 self.last_audit_time = self.filesetinfo["last_audit_endtime"]
+
+    def audit_running(self):
+        return "last_audit_starttime" in self.filesetinfo and not "last_audit_endtime" in self.filesetinfo
       
     def __iter__(self):
         return self
@@ -107,8 +112,10 @@ class FileSetListing:
         self.events_fh.flush()
 
     def find_access_events(self, directory=None):
+        # for top directory look upinfo and open files
         if directory is None:
-            self.get_filesetinfo() 
+            self.get_filesetinfo()
+            if self.audit_running(): return
             os.chdir(self.current_loc)
             self.open()
             directory = '.'
@@ -143,7 +150,7 @@ class FileSetListing:
             # if the file is new and has been access at least a day after deposit then its an access event.
             new_file_accessed = prev_path != path and atime > mtime + 24*3600
 
-            # if a privious file has been accessed then its an access event  
+            # if a privious file and has been accessed then its an access event  
             old_file_accessed = prev_path == path and atime > prev_atime
 
             if new_file_accessed or old_file_accessed:
@@ -167,7 +174,7 @@ def main():
     for spot in get_spot_list():
         print(spot)
         fslisting = FileSetListing(spot)
-        if time.time() - fslisting.last_done() > 20*3600: 
+        if time.time() - fslisting.last_done() > NDAYS * 24 * 3600: 
             fslisting.find_access_events()
 
 
