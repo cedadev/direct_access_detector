@@ -116,6 +116,7 @@ class FileSetListing:
         if directory is None:
             self.get_filesetinfo()
             if self.audit_running(): return
+            print(self.current_loc)
             os.chdir(self.current_loc)
             self.open()
             directory = '.'
