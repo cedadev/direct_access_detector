@@ -26,6 +26,8 @@ class FileSetListing:
 
     def store_file(self):
         return os.path.join(STORE, f"{self.spot}.txt")
+    def store_links_file(self):
+        return os.path.join(STORE, f"{self.spot}_links.txt")
     def store_tmp_file(self):
         return os.path.join(STORE, f"{self.spot}_____tmp.txt")
     def store_bak_file(self):
@@ -42,7 +44,12 @@ class FileSetListing:
     def get_filesetinfo(self):
         with urllib.request.urlopen(FILESETINFOURL % self.spot) as f:
             self.filesetinfo = json.loads(f.read())
-            self.current_loc = self.filesetinfo["storage_path"]
+            print(self.filesetinfo)
+            self.logical_path = self.filesetinfo["logical_path"]
+            if os.path.exists(self.logical_path) and os.path.islink(self.logical_path):
+                self.current_loc = os.readlink(self.logical_path)
+            else:
+                self.current_loc = None
             if "last_audit_starttime" in self.filesetinfo: 
                 self.last_audit_time = self.filesetinfo["last_audit_starttime"]
             if "last_audit_endtime" in self.filesetinfo: 
@@ -50,6 +57,9 @@ class FileSetListing:
 
     def audit_running(self):
         return "last_audit_starttime" in self.filesetinfo and not "last_audit_endtime" in self.filesetinfo
+
+    def not_there(self):
+        return self.current_loc is None
       
     def __iter__(self):
         return self
@@ -79,6 +89,7 @@ class FileSetListing:
         self.open_prev()
         self.open_next()
         self.events_fh = open(self.event_file(), "a")
+        self.links_fh = open(self.store_links_file(), "w")    
 
     def open_prev(self):
         if not os.path.exists(self.store_file()):
@@ -89,17 +100,22 @@ class FileSetListing:
     def open_next(self):
         if os.path.exists(self.store_tmp_file()):
             os.unlink(self.store_tmp_file())
-        self.next_fh = open(self.store_tmp_file(), "w")    
+        self.next_fh = open(self.store_tmp_file(), "w")
 
     def close(self):
         self.prev_fh.close()
         self.next_fh.close()
         self.events_fh.close()
+        self.links_fh.close()
         os.rename(self.store_file(), self.store_bak_file())
         os.rename(self.store_tmp_file(), self.store_file())
 
     def add(self, path, atime):
         self.next_fh.write(f"{path}|{atime}\n")
+
+    def addlink(self, path):
+        target = os.readlink(path)
+        self.links_fh.write(f"{path}|{target}\n")
 
     def make_event(self, path, atime, size):
         etime = datetime.datetime.fromtimestamp(atime).isoformat()
@@ -115,6 +131,7 @@ class FileSetListing:
         # for top directory look upinfo and open files
         if directory is None:
             self.get_filesetinfo()
+            if self.not_there(): return
             if self.audit_running(): return
             print(self.current_loc)
             os.chdir(self.current_loc)
@@ -131,6 +148,7 @@ class FileSetListing:
 
             # skip links
             if S_ISLNK(stat.st_mode):
+                self.addlink(path)
                 continue
 
             # recurse dirs
@@ -166,7 +184,9 @@ def get_spot_list():
     with urllib.request.urlopen(SPOTLISTURL) as f:
         for line in f:
             bits = line.decode().strip().split()
-            if len(bits) == 2: spots.append(bits[0])
+            if len(bits) == 2:
+                spotname = bits[0] 
+                spots.append(spotname)
     return spots
 
 
